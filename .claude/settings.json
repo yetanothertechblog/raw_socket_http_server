@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "deny": [
+      "Task",
+      "TaskOutput",
+      "ExitPlanMode",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "TaskStop",
+      "AskUserQuestion",
+      "Skill",
+      "EnterPlanMode",
+      "TaskCreate",
+      "TaskGet",
+      "TaskUpdate",
+      "TaskList",
+      "EnterWorktree"
+    ]
+  }
+}
