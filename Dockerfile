@@ -9,4 +9,4 @@ RUN go build -o rawhttp .
 FROM alpine:latest
 RUN apk add --no-cache iptables
 COPY --from=build /app/rawhttp /rawhttp
-CMD iptables -A INPUT -p tcp --dport 80 -j DROP && iptables -A INPUT -p icmp -j DROP && /rawhttp
+CMD iptables -A OUTPUT -p tcp --tcp-flags RST RST -j DROP && iptables -A INPUT -p icmp -j DROP && /rawhttp
