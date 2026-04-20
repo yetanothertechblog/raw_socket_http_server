@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"syscall"
 
@@ -17,25 +18,39 @@ func main() {
 	stack := tcp.NewStack(fd)
 	listener := stack.Listen(80)
 
-	fmt.Println("TCP echo server listening on port 80...")
+	fmt.Println("HTTP server listening on port 80...")
 
 	for {
 		conn := listener.Accept()
 		fmt.Println("Connection accepted")
-		buf := make([]byte, 1024)
-		for {
-			n, err := conn.Read(buf)
-			if err != nil {
-				// EOF Recieved
-				break
-			}
-			fmt.Printf("Received: %s\n", string(buf[:n]))
-			n, err = conn.Write(buf[:n])
-			if err != nil {
-				fmt.Printf("Sent %d bytes : %s", n, buf[:n])
-			}
-		}
-
-		conn.Close()
+		go handleConn(conn)
 	}
+}
+
+func handleConn(conn *tcp.TCPConnection) {
+	defer conn.Close()
+
+	// Read until end-of-headers. Ignores request body (fine for GET).
+	var req []byte
+	buf := make([]byte, 1024)
+	for !bytes.Contains(req, []byte("\r\n\r\n")) {
+		n, err := conn.Read(buf)
+		if err != nil {
+			return
+		}
+		req = append(req, buf[:n]...)
+	}
+	fmt.Printf("Request:\n%s\n", req)
+
+	body := "Hello\n"
+	resp := fmt.Sprintf(
+		"HTTP/1.1 200 OK\r\n"+
+			"Content-Type: text/plain\r\n"+
+			"Content-Length: %d\r\n"+
+			"Connection: close\r\n"+
+			"\r\n"+
+			"%s",
+		len(body), body,
+	)
+	conn.Write([]byte(resp))
 }

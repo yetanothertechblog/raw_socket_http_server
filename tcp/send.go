@@ -56,17 +56,31 @@ func generateISN() uint32 {
 	return uint32(n.Uint64())
 }
 
-// sendSegment builds a full Ethernet → IPv4 → TCP packet and sends it on the wire.
-// It computes the TCP checksum before sending.
+// sendSegment builds a full Ethernet → IPv4 → TCP packet and sends it on the wire,
+// using conn.SendSeqNum as the segment's SEQ and no TCP options. Use sendSegmentAt
+// for retransmits (explicit SEQ) or when TCP options must be included.
 func (s *Stack) sendSegment(conn *TCPConnection, flags byte, payload []byte, inFrame *model.EthernetFrame, from syscall.Sockaddr) {
+	s.sendSegmentAt(conn, flags, payload, conn.SendSeqNum, nil, inFrame, from)
+}
+
+// sendSegmentAt is identical to sendSegment but takes an explicit SEQ and optional
+// TCP options bytes. Options must be a multiple of 4 bytes; the caller is
+// responsible for any necessary NOP padding. Passing nil options produces a
+// standard 20-byte header.
+func (s *Stack) sendSegmentAt(conn *TCPConnection, flags byte, payload []byte, seqNum uint32, options []byte, inFrame *model.EthernetFrame, from syscall.Sockaddr) {
+	// DataOffset is in 4-byte words. 5 = 20 bytes (no options). Each 4 bytes of
+	// options adds 1 to DataOffset. +3 before /4 rounds up in case caller passes
+	// unaligned options (extra bytes in the header will be zero = End of Options).
+	dataOffset := uint8(5 + (len(options)+3)/4)
 	seg := model.TCPSegment{
 		SourcePort: conn.LocalPort,
 		DestPort:   conn.RemotePort,
-		SeqNum:     conn.SendSeqNum,
+		SeqNum:     seqNum,
 		AckNum:     conn.RecvSeqNum,
-		DataOffset: 5, // 20 bytes, no options
+		DataOffset: dataOffset,
 		Flags:      flags,
 		Window:     conn.RecvWindow,
+		Options:    options,
 		Payload:    payload,
 	}
 

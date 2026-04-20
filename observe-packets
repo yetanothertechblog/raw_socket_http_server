@@ -1,0 +1,13 @@
+#!/bin/sh
+# Attach tcpdump to the running rawhttp container's network namespace.
+# Extra args are passed through to tcpdump (e.g. ./observe-packets -X port 80).
+set -e
+
+CID=$(docker ps --filter ancestor=rawhttp --format '{{.ID}}' | head -n1)
+if [ -z "$CID" ]; then
+	echo "no running rawhttp container — start it with ./run.sh" >&2
+	exit 1
+fi
+
+exec docker run --rm -it --net=container:"$CID" nicolaka/netshoot \
+	tcpdump -i eth0 -nn "$@" tcp
