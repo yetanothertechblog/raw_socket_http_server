@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"syscall"
 
+	"github.com/http-server/m/http"
 	"github.com/http-server/m/tcp"
 )
 
@@ -18,39 +18,37 @@ func main() {
 	stack := tcp.NewStack(fd)
 	listener := stack.Listen(80)
 
+	mux := http.NewServeMux()
+	// "/" is registered as a prefix pattern (trailing slash → catch-all).
+	// We self-check req.Path so unknown paths still 404 instead of getting
+	// the index page.
+	mux.RegisterHandler("/", func(req *http.Request, w *http.ResponseWriter) {
+		if req.Path != "/" {
+			w.WriteHeader(404)
+			w.Write([]byte("404 Not Found\n"))
+			return
+		}
+		w.WriteHeader(200)
+		w.Write([]byte("Hello\n"))
+	})
+	mux.RegisterHandler("/healthz", func(req *http.Request, w *http.ResponseWriter) {
+		w.WriteHeader(200)
+		w.Write([]byte("ok\n"))
+	})
+	// Prefix demo: every /echo/<x> returns <x>.
+	mux.RegisterHandler("/echo/", func(req *http.Request, w *http.ResponseWriter) {
+		w.WriteHeader(200)
+		w.Write([]byte(req.Path[len("/echo/"):] + "\n"))
+	})
+
 	fmt.Println("HTTP server listening on port 80...")
 
 	for {
 		conn := listener.Accept()
 		fmt.Println("Connection accepted")
-		go handleConn(conn)
+		go func(c *tcp.TCPConnection) {
+			defer c.Close()
+			http.Serve(c, mux)
+		}(conn)
 	}
-}
-
-func handleConn(conn *tcp.TCPConnection) {
-	defer conn.Close()
-
-	// Read until end-of-headers. Ignores request body (fine for GET).
-	var req []byte
-	buf := make([]byte, 1024)
-	for !bytes.Contains(req, []byte("\r\n\r\n")) {
-		n, err := conn.Read(buf)
-		if err != nil {
-			return
-		}
-		req = append(req, buf[:n]...)
-	}
-	fmt.Printf("Request:\n%s\n", req)
-
-	body := "Hello\n"
-	resp := fmt.Sprintf(
-		"HTTP/1.1 200 OK\r\n"+
-			"Content-Type: text/plain\r\n"+
-			"Content-Length: %d\r\n"+
-			"Connection: close\r\n"+
-			"\r\n"+
-			"%s",
-		len(body), body,
-	)
-	conn.Write([]byte(resp))
 }

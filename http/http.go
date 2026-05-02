@@ -1,8 +1,13 @@
 package http
 
+import "strings"
+
 type Request struct {
 	Method  string
 	Path    string
+	Version string
+	// Headers keys are stored lower-cased. Duplicate occurrences of the same
+	// header name are joined with ", " per RFC 7230 §3.2.2.
 	Headers map[string]string
 	Body    []byte
 }
@@ -24,12 +29,58 @@ func (w *ResponseWriter) WriteHeader(statusCode int) {
 
 type HandlerFunc func(*Request, *ResponseWriter)
 
+// ServeMux is a tiny HTTP request router.
+//
+// Patterns NOT ending in "/" are exact-match: they match only when req.Path
+// equals the pattern character-for-character. Patterns ending in "/" are
+// prefix-match: they match any req.Path that has that pattern as a prefix.
+// When both could match, exact wins; among multiple prefix matches, the
+// longest one wins. Matches stdlib net/http.ServeMux semantics.
+//
+// Registering "/" therefore creates a catch-all (every path begins with "/"),
+// which is usually not what you want unless the handler self-checks
+// req.Path == "/".
 type ServeMux struct {
-	routes map[string]HandlerFunc
+	exact  map[string]HandlerFunc
+	prefix map[string]HandlerFunc
 }
 
-func (mux *ServeMux) RegisterHandler(path string, handlerFunc HandlerFunc) {
-	mux.routes[path] = handlerFunc
+func NewServeMux() *ServeMux {
+	return &ServeMux{
+		exact:  make(map[string]HandlerFunc),
+		prefix: make(map[string]HandlerFunc),
+	}
+}
+
+func (mux *ServeMux) RegisterHandler(pattern string, handlerFunc HandlerFunc) {
+	if mux.exact == nil {
+		mux.exact = make(map[string]HandlerFunc)
+	}
+	if mux.prefix == nil {
+		mux.prefix = make(map[string]HandlerFunc)
+	}
+	if strings.HasSuffix(pattern, "/") {
+		mux.prefix[pattern] = handlerFunc
+	} else {
+		mux.exact[pattern] = handlerFunc
+	}
+}
+
+// match returns the handler for path: exact first, then longest matching
+// prefix. Returns nil if nothing matches.
+func (mux *ServeMux) match(path string) HandlerFunc {
+	if h, ok := mux.exact[path]; ok {
+		return h
+	}
+	var best HandlerFunc
+	bestLen := -1
+	for pat, h := range mux.prefix {
+		if len(pat) > bestLen && strings.HasPrefix(path, pat) {
+			best = h
+			bestLen = len(pat)
+		}
+	}
+	return best
 }
 
 func (mux *ServeMux) Handle(req *Request) *ResponseWriter {
@@ -37,17 +88,14 @@ func (mux *ServeMux) Handle(req *Request) *ResponseWriter {
 		StatusCode: 200,
 		Headers:    make(map[string]string),
 	}
-	handler, ok := mux.routes[req.Path]
-
-	if !ok {
+	handler := mux.match(req.Path)
+	if handler == nil {
 		w.StatusCode = 404
 		w.Write([]byte("404 Not Found\n"))
 		return w
 	}
-
 	handler(req, w)
 	return w
-
 }
 
 var statusTexts = map[int]string{
@@ -62,5 +110,10 @@ var statusTexts = map[int]string{
 	403: "Forbidden",
 	404: "Not Found",
 	405: "Method Not Allowed",
+	411: "Length Required",
+	413: "Payload Too Large",
+	431: "Request Header Fields Too Large",
 	500: "Internal Server Error",
+	501: "Not Implemented",
+	505: "HTTP Version Not Supported",
 }
