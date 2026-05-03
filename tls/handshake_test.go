@@ -194,7 +194,7 @@ func TestHandshake_RejectsClientWithoutTLS13(t *testing.T) {
 		cipherSuites:        []uint16{cipherTLSAES128GCMSHA256},
 		supportedVersions:   []uint16{0x0303}, // only TLS 1.2
 		supportedGroups:     []uint16{namedGroupX25519},
-		signatureAlgorithms: []uint16{sigSchemeEd25519},
+		signatureAlgorithms: []uint16{sigSchemeECDSAP256SHA256},
 		keyShares:           []keyShareEntry{{group: namedGroupX25519, keyExchange: bytes.Repeat([]byte{0x01}, 32)}},
 	}
 	if err := validateClientHello(hello); err == nil {
@@ -207,7 +207,7 @@ func TestHandshake_RejectsClientWithoutX25519(t *testing.T) {
 		cipherSuites:        []uint16{cipherTLSAES128GCMSHA256},
 		supportedVersions:   []uint16{tls13Version},
 		supportedGroups:     []uint16{0x0017}, // secp256r1 only
-		signatureAlgorithms: []uint16{sigSchemeEd25519},
+		signatureAlgorithms: []uint16{sigSchemeECDSAP256SHA256},
 	}
 	if err := validateClientHello(hello); err == nil {
 		t.Errorf("expected error when x25519 not offered")
@@ -219,7 +219,7 @@ func TestHandshake_RejectsX25519GroupWithoutKeyShare(t *testing.T) {
 		cipherSuites:        []uint16{cipherTLSAES128GCMSHA256},
 		supportedVersions:   []uint16{tls13Version},
 		supportedGroups:     []uint16{namedGroupX25519},
-		signatureAlgorithms: []uint16{sigSchemeEd25519},
+		signatureAlgorithms: []uint16{sigSchemeECDSAP256SHA256},
 		// No keyShares — the only way the client can offer x25519 in
 		// supported_groups but send no key_share is to expect HRR. We
 		// don't implement HRR.
@@ -234,7 +234,7 @@ func TestHandshake_RejectsBadKeyShareLength(t *testing.T) {
 		cipherSuites:        []uint16{cipherTLSAES128GCMSHA256},
 		supportedVersions:   []uint16{tls13Version},
 		supportedGroups:     []uint16{namedGroupX25519},
-		signatureAlgorithms: []uint16{sigSchemeEd25519},
+		signatureAlgorithms: []uint16{sigSchemeECDSAP256SHA256},
 		keyShares:           []keyShareEntry{{group: namedGroupX25519, keyExchange: []byte{0x01}}}, // 1 byte
 	}
 	if err := validateClientHello(hello); err == nil {

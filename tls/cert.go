@@ -1,8 +1,10 @@
 package tls
 
 import (
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
@@ -13,13 +15,20 @@ import (
 // Server identity: the self-signed cert we ship in the Certificate handshake
 // message and the private key we use to sign CertificateVerify.
 //
-// Scope: ed25519 only, single self-signed leaf cert (no chain), generated
-// fresh in memory at server start. Curl will need -k anyway since the cert
-// isn't trust-anchored, so there's nothing to gain from persisting it.
+// Scope: ECDSA P-256 with SHA-256 (TLS 1.3 sig scheme 0x0403), single
+// self-signed leaf cert (no chain), generated fresh in memory at server
+// start. Curl will need -k anyway since the cert isn't trust-anchored, so
+// there's nothing to gain from persisting it.
+//
+// Why ECDSA P-256 rather than ed25519: macOS curl (LibreSSL/SecureTransport
+// backends) does not advertise ed25519 in TLS 1.3 signature_algorithms, so
+// our server's policy check used to reject every macOS curl client. ECDSA
+// P-256 is universally offered by every TLS 1.3 client we care about
+// (curl across all backends, browsers, the Go stdlib).
 //
 // SANs cover localhost / 127.0.0.1 / ::1, which is everything our local
 // test setup exercises. To run on a real hostname you'd add it to
-// generateServerIdentity's DNSNames slice.
+// NewServerIdentity's DNSNames slice.
 
 // certificateVerifyContextServer is the ASCII context string that goes into
 // the CertificateVerify sign input (RFC 8446 §4.4.3). The matching client
@@ -44,15 +53,14 @@ type ServerIdentity struct {
 	// certificate_list (RFC 8446 §4.4.2).
 	certDER []byte
 
-	priv ed25519.PrivateKey
-	pub  ed25519.PublicKey
+	priv *ecdsa.PrivateKey
 }
 
-// NewServerIdentity creates a fresh self-signed ed25519 cert covering
+// NewServerIdentity creates a fresh self-signed ECDSA P-256 cert covering
 // localhost / 127.0.0.1 / ::1, valid for ~10 years. Called once at startup;
 // the result is shared across every TLS connection the server accepts.
 func NewServerIdentity() (*ServerIdentity, error) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +101,9 @@ func NewServerIdentity() (*ServerIdentity, error) {
 	}
 
 	// Self-signed: parent == template, signed under our own private key.
-	certDER, err := x509.CreateCertificate(rand.Reader, template, template, pub, priv)
+	// x509.CreateCertificate picks ECDSAWithSHA256 automatically for a
+	// P-256 key.
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +111,6 @@ func NewServerIdentity() (*ServerIdentity, error) {
 	return &ServerIdentity{
 		certDER: certDER,
 		priv:    priv,
-		pub:     pub,
 	}, nil
 }
 
@@ -130,10 +139,16 @@ func certificateVerifySignInput(transcriptHash []byte) []byte {
 }
 
 // signCertificateVerify signs the transcript-hash payload per RFC 8446
-// §4.4.3 with the server's ed25519 private key. The output is the 64-byte
-// signature that goes into the CertificateVerify handshake message's
-// signature field; the surrounding wire format (algorithm code + length
-// prefix) is the responsibility of the message serializer, not this package.
-func (s *ServerIdentity) signCertificateVerify(transcriptHash []byte) []byte {
-	return ed25519.Sign(s.priv, certificateVerifySignInput(transcriptHash))
+// §4.4.3 with the server's ECDSA P-256 / SHA-256 private key. The output is
+// the DER-encoded ECDSA-Sig-Value (SEQUENCE { r INTEGER, s INTEGER }) that
+// goes into the CertificateVerify handshake message's signature field; the
+// surrounding wire format (algorithm code + length prefix) is the
+// responsibility of the message serializer, not this package.
+//
+// ecdsa.SignASN1 hashes-then-signs internally? No — it signs a pre-computed
+// digest. RFC 8446 §4.2.3 specifies SHA-256 as the hash for sig scheme
+// 0x0403, so we hash here.
+func (s *ServerIdentity) signCertificateVerify(transcriptHash []byte) ([]byte, error) {
+	digest := sha256.Sum256(certificateVerifySignInput(transcriptHash))
+	return ecdsa.SignASN1(rand.Reader, s.priv, digest[:])
 }

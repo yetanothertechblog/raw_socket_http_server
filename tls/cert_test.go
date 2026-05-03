@@ -2,7 +2,8 @@ package tls
 
 import (
 	"bytes"
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
 	"crypto/x509"
 	"net"
@@ -44,21 +45,15 @@ func TestGenerateServerIdentity_PublicKeyMatches(t *testing.T) {
 	s := freshIdentity(t)
 	cert := parseCert(t, s)
 
-	parsedPub, ok := cert.PublicKey.(ed25519.PublicKey)
+	parsedPub, ok := cert.PublicKey.(*ecdsa.PublicKey)
 	if !ok {
-		t.Fatalf("cert public key type = %T, want ed25519.PublicKey", cert.PublicKey)
+		t.Fatalf("cert public key type = %T, want *ecdsa.PublicKey", cert.PublicKey)
 	}
-	if !bytes.Equal(parsedPub, s.pub) {
-		t.Errorf("cert pub != identity pub\n cert:     %x\n identity: %x", parsedPub, s.pub)
+	if parsedPub.Curve != elliptic.P256() {
+		t.Errorf("cert pub curve = %v, want P-256", parsedPub.Curve.Params().Name)
 	}
-
-	// Sanity: the private key's public half should match too.
-	derivedPub, ok := s.priv.Public().(ed25519.PublicKey)
-	if !ok {
-		t.Fatalf("priv.Public() type = %T", s.priv.Public())
-	}
-	if !bytes.Equal(derivedPub, s.pub) {
-		t.Errorf("priv.Public() != identity pub")
+	if parsedPub.X.Cmp(s.priv.PublicKey.X) != 0 || parsedPub.Y.Cmp(s.priv.PublicKey.Y) != 0 {
+		t.Errorf("cert pub != identity priv.PublicKey")
 	}
 }
 
@@ -145,6 +140,9 @@ func TestGenerateServerIdentity_NotCA(t *testing.T) {
 // deliberately is not. CheckSignature does the cryptographic check directly.
 func TestGenerateServerIdentity_SelfSignatureVerifies(t *testing.T) {
 	cert := parseCert(t, freshIdentity(t))
+	if cert.SignatureAlgorithm != x509.ECDSAWithSHA256 {
+		t.Errorf("SignatureAlgorithm = %v, want ECDSAWithSHA256", cert.SignatureAlgorithm)
+	}
 	err := cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature)
 	if err != nil {
 		t.Errorf("self-signature does not verify: %v", err)
@@ -154,8 +152,8 @@ func TestGenerateServerIdentity_SelfSignatureVerifies(t *testing.T) {
 func TestGenerateServerIdentity_FreshKeysEachCall(t *testing.T) {
 	a := freshIdentity(t)
 	b := freshIdentity(t)
-	if bytes.Equal(a.pub, b.pub) {
-		t.Errorf("two generations produced the same public key — RNG bug?")
+	if a.priv.D.Cmp(b.priv.D) == 0 {
+		t.Errorf("two generations produced the same private scalar — RNG bug?")
 	}
 	if bytes.Equal(a.certDER, b.certDER) {
 		t.Errorf("two generations produced the same cert DER")
@@ -228,44 +226,67 @@ func TestSignCertificateVerify_VerifiesUnderOwnPubKey(t *testing.T) {
 	s := freshIdentity(t)
 	transcript := bytes.Repeat([]byte{0xCD}, sha256.Size)
 
-	sig := s.signCertificateVerify(transcript)
-	input := certificateVerifySignInput(transcript)
+	sig, err := s.signCertificateVerify(transcript)
+	if err != nil {
+		t.Fatalf("signCertificateVerify: %v", err)
+	}
+	digest := sha256.Sum256(certificateVerifySignInput(transcript))
 
-	if !ed25519.Verify(s.pub, input, sig) {
-		t.Errorf("ed25519.Verify failed under our own public key")
+	if !ecdsa.VerifyASN1(&s.priv.PublicKey, digest[:], sig) {
+		t.Errorf("ecdsa.VerifyASN1 failed under our own public key")
 	}
 }
 
-func TestSignCertificateVerify_OutputLength(t *testing.T) {
+// TestSignCertificateVerify_OutputIsDERSequence: the wire format for ECDSA
+// in TLS 1.3 is the DER encoding of ECDSA-Sig-Value (RFC 5480) — a SEQUENCE
+// of two INTEGERs. The first byte is the SEQUENCE tag (0x30).
+func TestSignCertificateVerify_OutputIsDERSequence(t *testing.T) {
 	s := freshIdentity(t)
-	sig := s.signCertificateVerify(make([]byte, sha256.Size))
-	if len(sig) != ed25519.SignatureSize {
-		t.Errorf("sig length = %d, want %d", len(sig), ed25519.SignatureSize)
+	sig, err := s.signCertificateVerify(make([]byte, sha256.Size))
+	if err != nil {
+		t.Fatalf("signCertificateVerify: %v", err)
+	}
+	if len(sig) < 8 || sig[0] != 0x30 {
+		t.Errorf("sig is not a DER SEQUENCE (first byte %#x, len %d)", sig[0], len(sig))
+	}
+	// Sanity bound: P-256 r,s are each ≤ 32 bytes; with DER overhead the
+	// total fits comfortably under 80 bytes.
+	if len(sig) > 80 {
+		t.Errorf("sig length %d unexpectedly large for P-256", len(sig))
 	}
 }
 
 // TestSignCertificateVerify_DependsOnTranscript: a different transcript must
-// produce a different signature. ed25519 is deterministic, so this also
-// catches the bug where the transcript argument is silently ignored.
+// produce a verifiable signature whose payload commits to the new transcript.
+// ECDSA is randomized so we can't compare bytes — instead we verify each
+// signature against its own digest and confirm cross-verification fails.
 func TestSignCertificateVerify_DependsOnTranscript(t *testing.T) {
 	s := freshIdentity(t)
-	a := s.signCertificateVerify(bytes.Repeat([]byte{0x01}, sha256.Size))
-	b := s.signCertificateVerify(bytes.Repeat([]byte{0x02}, sha256.Size))
-	if bytes.Equal(a, b) {
-		t.Errorf("signatures identical for different transcripts")
-	}
-}
+	tA := bytes.Repeat([]byte{0x01}, sha256.Size)
+	tB := bytes.Repeat([]byte{0x02}, sha256.Size)
 
-// TestSignCertificateVerify_DeterministicForSameInputs: ed25519 is RFC 8032-
-// deterministic — same key + same message → same signature, every time. If
-// this test ever flakes, something is mixing entropy into the signing path.
-func TestSignCertificateVerify_DeterministicForSameInputs(t *testing.T) {
-	s := freshIdentity(t)
-	transcript := bytes.Repeat([]byte{0xEE}, sha256.Size)
-	a := s.signCertificateVerify(transcript)
-	b := s.signCertificateVerify(transcript)
-	if !bytes.Equal(a, b) {
-		t.Errorf("ed25519 produced non-deterministic signatures")
+	sigA, err := s.signCertificateVerify(tA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigB, err := s.signCertificateVerify(tB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	digestA := sha256.Sum256(certificateVerifySignInput(tA))
+	digestB := sha256.Sum256(certificateVerifySignInput(tB))
+
+	if !ecdsa.VerifyASN1(&s.priv.PublicKey, digestA[:], sigA) {
+		t.Errorf("sigA does not verify against digestA")
+	}
+	if !ecdsa.VerifyASN1(&s.priv.PublicKey, digestB[:], sigB) {
+		t.Errorf("sigB does not verify against digestB")
+	}
+	// Cross-verify: a signature for transcript A must NOT validate against
+	// transcript B's digest. This is what catches "transcript ignored" bugs.
+	if ecdsa.VerifyASN1(&s.priv.PublicKey, digestB[:], sigA) {
+		t.Errorf("sigA verified under digestB — transcript not bound into signature")
 	}
 }
 
@@ -277,10 +298,13 @@ func TestSignCertificateVerify_RejectsForgery(t *testing.T) {
 	b := freshIdentity(t)
 	transcript := bytes.Repeat([]byte{0x77}, sha256.Size)
 
-	sig := a.signCertificateVerify(transcript)
-	input := certificateVerifySignInput(transcript)
+	sig, err := a.signCertificateVerify(transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(certificateVerifySignInput(transcript))
 
-	if ed25519.Verify(b.pub, input, sig) {
+	if ecdsa.VerifyASN1(&b.priv.PublicKey, digest[:], sig) {
 		t.Errorf("signature from identity A verified under identity B's pubkey")
 	}
 }
