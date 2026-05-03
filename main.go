@@ -6,6 +6,7 @@ import (
 
 	"github.com/http-server/m/http"
 	"github.com/http-server/m/tcp"
+	"github.com/http-server/m/tls"
 )
 
 func main() {
@@ -15,8 +16,13 @@ func main() {
 	}
 	defer syscall.Close(fd)
 
+	identity, err := tls.NewServerIdentity()
+	if err != nil {
+		panic(fmt.Errorf("generating server identity: %w", err))
+	}
+
 	stack := tcp.NewStack(fd)
-	listener := stack.Listen(80)
+	listener := stack.Listen(443)
 
 	mux := http.NewServeMux()
 	// "/" is registered as a prefix pattern (trailing slash → catch-all).
@@ -29,7 +35,7 @@ func main() {
 			return
 		}
 		w.WriteHeader(200)
-		w.Write([]byte("Hello\n"))
+		w.Write([]byte("Hello over our own TLS!\n"))
 	})
 	mux.RegisterHandler("/healthz", func(req *http.Request, w *http.ResponseWriter) {
 		w.WriteHeader(200)
@@ -41,14 +47,19 @@ func main() {
 		w.Write([]byte(req.Path[len("/echo/"):] + "\n"))
 	})
 
-	fmt.Println("HTTP server listening on port 80...")
+	fmt.Println("HTTPS server listening on port 443...")
 
 	for {
 		conn := listener.Accept()
 		fmt.Println("Connection accepted")
 		go func(c *tcp.TCPConnection) {
 			defer c.Close()
-			http.Serve(c, mux)
+			tlsConn := tls.Server(c, identity)
+			if err := tlsConn.Handshake(); err != nil {
+				fmt.Printf("TLS handshake failed: %v\n", err)
+				return
+			}
+			http.Serve(tlsConn, mux)
 		}(conn)
 	}
 }
