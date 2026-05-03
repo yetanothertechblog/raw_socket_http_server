@@ -99,7 +99,7 @@ func makeGoodClientHello() ([]byte, [32]byte) {
 		buildExt(extTypeServerName, buildSNI("localhost")),
 		buildExt(extTypeSupportedVersions, buildSupportedVersionsClient(tls13Version)),
 		buildExt(extTypeSupportedGroups, buildU16ListExt(namedGroupX25519)),
-		buildExt(extTypeSignatureAlgorithms, buildU16ListExt(sigSchemeEd25519)),
+		buildExt(extTypeSignatureAlgorithms, buildU16ListExt(sigSchemeECDSAP256SHA256)),
 		buildExt(extTypeKeyShare, buildClientKeyShare([]keyShareEntry{
 			{group: namedGroupX25519, keyExchange: goodHelloKey},
 		})),
@@ -187,7 +187,7 @@ func TestParseClientHello_Happy(t *testing.T) {
 	if len(hello.supportedGroups) != 1 || hello.supportedGroups[0] != namedGroupX25519 {
 		t.Errorf("supportedGroups = %v", hello.supportedGroups)
 	}
-	if len(hello.signatureAlgorithms) != 1 || hello.signatureAlgorithms[0] != sigSchemeEd25519 {
+	if len(hello.signatureAlgorithms) != 1 || hello.signatureAlgorithms[0] != sigSchemeECDSAP256SHA256 {
 		t.Errorf("signatureAlgorithms = %v", hello.signatureAlgorithms)
 	}
 	if len(hello.keyShares) != 1 ||
@@ -432,15 +432,18 @@ func TestMarshalCertificate_Layout(t *testing.T) {
 // ----- CertificateVerify -----------------------------------------------------
 
 func TestMarshalCertificateVerify_Layout(t *testing.T) {
-	sig := bytes.Repeat([]byte{0x55}, 64) // ed25519 signature size
-	body := marshalCertificateVerify(sigSchemeEd25519, sig)
-	if len(body) != 2+2+64 {
-		t.Fatalf("len = %d, want %d", len(body), 2+2+64)
+	// ECDSA P-256 signatures are DER-encoded SEQUENCE{r,s} with variable
+	// length around 70-72 bytes. The marshaler doesn't care — it length-
+	// prefixes whatever it gets. Any byte slice exercises the layout.
+	sig := bytes.Repeat([]byte{0x55}, 71)
+	body := marshalCertificateVerify(sigSchemeECDSAP256SHA256, sig)
+	if len(body) != 2+2+len(sig) {
+		t.Fatalf("len = %d, want %d", len(body), 2+2+len(sig))
 	}
-	if binary.BigEndian.Uint16(body[:2]) != sigSchemeEd25519 {
+	if binary.BigEndian.Uint16(body[:2]) != sigSchemeECDSAP256SHA256 {
 		t.Errorf("scheme = %#x", binary.BigEndian.Uint16(body[:2]))
 	}
-	if binary.BigEndian.Uint16(body[2:4]) != 64 {
+	if int(binary.BigEndian.Uint16(body[2:4])) != len(sig) {
 		t.Errorf("sig length = %d", binary.BigEndian.Uint16(body[2:4]))
 	}
 	if !bytes.Equal(body[4:], sig) {

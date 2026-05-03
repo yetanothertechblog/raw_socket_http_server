@@ -135,8 +135,11 @@ func (c *Conn) runHandshake() error {
 
 	// 8. CertificateVerify — sign the transcript through Certificate.
 	transcriptForCV := tx.sum()
-	sig := c.identity.signCertificateVerify(transcriptForCV)
-	cvMsg := marshalHandshake(handshakeTypeCertificateVerify, marshalCertificateVerify(sigSchemeEd25519, sig))
+	sig, err := c.identity.signCertificateVerify(transcriptForCV)
+	if err != nil {
+		return fmt.Errorf("sign CertificateVerify: %w", err)
+	}
+	cvMsg := marshalHandshake(handshakeTypeCertificateVerify, marshalCertificateVerify(sigSchemeECDSAP256SHA256, sig))
 	if err := c.writeEncryptedHandshake(cvMsg); err != nil {
 		return fmt.Errorf("write CertificateVerify: %w", err)
 	}
@@ -205,8 +208,8 @@ func validateClientHello(h *clientHello) error {
 	if !containsU16(h.supportedGroups, namedGroupX25519) {
 		return errors.New("tls: client did not offer x25519")
 	}
-	if !containsU16(h.signatureAlgorithms, sigSchemeEd25519) {
-		return errors.New("tls: client did not offer ed25519")
+	if !containsU16(h.signatureAlgorithms, sigSchemeECDSAP256SHA256) {
+		return errors.New("tls: client did not offer ecdsa_secp256r1_sha256")
 	}
 	share := h.findKeyShare(namedGroupX25519)
 	if share == nil {

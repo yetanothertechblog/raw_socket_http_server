@@ -7,6 +7,6 @@ RUN go build -o rawhttp .
 
 # Stage 2 with minimal image
 FROM alpine:latest
-RUN apk add --no-cache iptables
+RUN apk add --no-cache iptables iproute2
 COPY --from=build /app/rawhttp /rawhttp
 CMD iptables -A OUTPUT -p tcp --tcp-flags RST RST -j DROP && iptables -A INPUT -p icmp -j DROP && /rawhttp

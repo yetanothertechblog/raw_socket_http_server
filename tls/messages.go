@@ -42,9 +42,9 @@ const (
 
 	// The single curve, signature scheme, and cipher suite we support.
 	// Anything else from the client gets rejected by the state machine.
-	namedGroupX25519         uint16 = 0x001D
-	sigSchemeEd25519         uint16 = 0x0807
-	cipherTLSAES128GCMSHA256 uint16 = 0x1301
+	namedGroupX25519           uint16 = 0x001D
+	sigSchemeECDSAP256SHA256   uint16 = 0x0403
+	cipherTLSAES128GCMSHA256   uint16 = 0x1301
 
 	// SNI name_type for host_name (RFC 6066 §3).
 	sniHostName uint8 = 0
