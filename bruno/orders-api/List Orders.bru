@@ -1,0 +1,19 @@
+meta {
+  name: List Orders
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/orders
+  body: none
+  auth: none
+}
+
+settings {
+  sslVerification: false
+}
+
+assert {
+  res.status: eq 200
+}

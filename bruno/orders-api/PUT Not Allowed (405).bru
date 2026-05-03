@@ -1,0 +1,27 @@
+meta {
+  name: PUT Not Allowed (405)
+  type: http
+  seq: 7
+}
+
+put {
+  url: {{baseUrl}}/orders
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {}
+}
+
+settings {
+  sslVerification: false
+}
+
+assert {
+  res.status: eq 405
+}

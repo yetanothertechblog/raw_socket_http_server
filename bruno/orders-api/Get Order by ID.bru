@@ -1,0 +1,20 @@
+meta {
+  name: Get Order by ID
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/orders/{{orderId}}
+  body: none
+  auth: none
+}
+
+settings {
+  sslVerification: false
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: isNumber
+}

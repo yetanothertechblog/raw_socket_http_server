@@ -12,18 +12,18 @@ import (
 
 // freshIdentity returns a server identity for tests, failing the test on any
 // generation error so test bodies don't have to keep re-asserting err == nil.
-func freshIdentity(t *testing.T) *serverIdentity {
+func freshIdentity(t *testing.T) *ServerIdentity {
 	t.Helper()
-	s, err := generateServerIdentity()
+	s, err := NewServerIdentity()
 	if err != nil {
-		t.Fatalf("generateServerIdentity: %v", err)
+		t.Fatalf("NewServerIdentity: %v", err)
 	}
 	return s
 }
 
 // parseCert parses the DER bytes our identity produced and returns the
 // x509.Certificate so tests can inspect specific fields.
-func parseCert(t *testing.T, s *serverIdentity) *x509.Certificate {
+func parseCert(t *testing.T, s *ServerIdentity) *x509.Certificate {
 	t.Helper()
 	cert, err := x509.ParseCertificate(s.certDER)
 	if err != nil {
@@ -271,7 +271,7 @@ func TestSignCertificateVerify_DeterministicForSameInputs(t *testing.T) {
 
 // TestSignCertificateVerify_RejectsForgery: a signature from one identity
 // must not verify under another's public key. Catches accidental swap of
-// pub/priv keys in generateServerIdentity.
+// pub/priv keys in NewServerIdentity.
 func TestSignCertificateVerify_RejectsForgery(t *testing.T) {
 	a := freshIdentity(t)
 	b := freshIdentity(t)

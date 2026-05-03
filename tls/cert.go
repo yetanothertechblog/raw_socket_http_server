@@ -36,9 +36,9 @@ const certValidity = 10 * 365 * 24 * time.Hour
 // slightly ahead of ours doesn't reject the cert as not-yet-valid.
 const certClockSkew = time.Minute
 
-// serverIdentity bundles everything the handshake needs about the server's
+// ServerIdentity bundles everything the handshake needs about the server's
 // own keypair.
-type serverIdentity struct {
+type ServerIdentity struct {
 	// certDER is the X.509 certificate in DER form. It ships verbatim as
 	// the single entry of the Certificate handshake message's
 	// certificate_list (RFC 8446 §4.4.2).
@@ -48,10 +48,10 @@ type serverIdentity struct {
 	pub  ed25519.PublicKey
 }
 
-// generateServerIdentity creates a fresh self-signed ed25519 cert covering
+// NewServerIdentity creates a fresh self-signed ed25519 cert covering
 // localhost / 127.0.0.1 / ::1, valid for ~10 years. Called once at startup;
 // the result is shared across every TLS connection the server accepts.
-func generateServerIdentity() (*serverIdentity, error) {
+func NewServerIdentity() (*ServerIdentity, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func generateServerIdentity() (*serverIdentity, error) {
 		return nil, err
 	}
 
-	return &serverIdentity{
+	return &ServerIdentity{
 		certDER: certDER,
 		priv:    priv,
 		pub:     pub,
@@ -134,6 +134,6 @@ func certificateVerifySignInput(transcriptHash []byte) []byte {
 // signature that goes into the CertificateVerify handshake message's
 // signature field; the surrounding wire format (algorithm code + length
 // prefix) is the responsibility of the message serializer, not this package.
-func (s *serverIdentity) signCertificateVerify(transcriptHash []byte) []byte {
+func (s *ServerIdentity) signCertificateVerify(transcriptHash []byte) []byte {
 	return ed25519.Sign(s.priv, certificateVerifySignInput(transcriptHash))
 }

@@ -2,6 +2,7 @@ package tls
 
 import (
 	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
 )
@@ -157,4 +158,17 @@ func trafficKeyAndIV(trafficSecret []byte) (key, iv []byte) {
 //	verify_data  = HMAC(finished_key, Transcript-Hash(handshake_messages))
 func finishedKey(trafficSecret []byte) []byte {
 	return hkdfExpandLabel(trafficSecret, "finished", nil, hashLen)
+}
+
+// verifyData computes the Finished verify_data field (RFC 8446 §4.4.4):
+//
+//	verify_data = HMAC(finished_key(traffic_secret), Transcript-Hash(...))
+//
+// `transcriptHash` is the SHA-256 transcript through the message immediately
+// before the Finished being computed (server: through CertificateVerify;
+// client: through server Finished).
+func verifyData(trafficSecret, transcriptHash []byte) []byte {
+	mac := hmac.New(sha256.New, finishedKey(trafficSecret))
+	mac.Write(transcriptHash)
+	return mac.Sum(nil)
 }
