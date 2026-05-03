@@ -1,0 +1,19 @@
+meta {
+  name: Unknown ID (404)
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/orders/99999
+  body: none
+  auth: none
+}
+
+settings {
+  sslVerification: false
+}
+
+assert {
+  res.status: eq 404
+}

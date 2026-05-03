@@ -295,12 +295,20 @@ func (s *Stack) handleSegment(conn *TCPConnection, seg *model.TCPSegment, pkt *m
 			l.accept <- conn
 		}
 
+		// The same segment may carry piggybacked data and/or FIN — fall
+		// through to ESTABLISHED handling so we don't drop bytes that
+		// arrived on the third leg of the handshake. TLS clients (curl,
+		// Go stdlib) routinely combine the ACK with the first record.
+		fallthrough
+
 	case ESTABLISHED:
 		if !s.processAck(conn, seg, frame, from) {
 			return
 		}
 
 		// Handle incoming data
+		// TODO: handle out-of-order segments — currently we only accept in-order data
+		// and silently drop anything that doesn't match RecvSeqNum
 		// TODO: handle out-of-order segments — currently we only accept in-order data
 		// and silently drop anything that doesn't match RecvSeqNum
 		if len(seg.Payload) > 0 && seg.SeqNum == conn.RecvSeqNum {

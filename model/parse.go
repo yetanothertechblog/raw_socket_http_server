@@ -58,7 +58,14 @@ func ParseIPv4Packet(buf []byte) (IPv4Packet, error) {
 	if len(buf) < headerLen {
 		return IPv4Packet{}, fmt.Errorf("IPv4 header truncated: IHL=%d but only %d bytes", pkt.IHL, len(buf))
 	}
-	pkt.Payload = buf[headerLen:]
+	// Trim Ethernet padding: small frames (e.g. bare ACKs) are padded to the
+	// 60-byte minimum, but TotalLen tells us where the IP datagram actually
+	// ends. Without this, the trailing padding is mistaken for TCP payload.
+	end := int(pkt.TotalLen)
+	if end < headerLen || end > len(buf) {
+		end = len(buf)
+	}
+	pkt.Payload = buf[headerLen:end]
 
 	return pkt, nil
 }

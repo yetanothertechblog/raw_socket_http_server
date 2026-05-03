@@ -1,0 +1,19 @@
+meta {
+  name: Bad ID Format (400)
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/orders/abc
+  body: none
+  auth: none
+}
+
+settings {
+  sslVerification: false
+}
+
+assert {
+  res.status: eq 400
+}

@@ -5,6 +5,7 @@ import (
 	"syscall"
 
 	"github.com/http-server/m/http"
+	"github.com/http-server/m/orders"
 	"github.com/http-server/m/tcp"
 	"github.com/http-server/m/tls"
 )
@@ -21,10 +22,17 @@ func main() {
 		panic(fmt.Errorf("generating server identity: %w", err))
 	}
 
+	store, err := orders.NewStore(":memory:")
+	if err != nil {
+		panic(fmt.Errorf("opening order store: %w", err))
+	}
+	defer store.Close()
+
 	stack := tcp.NewStack(fd)
 	listener := stack.Listen(443)
 
 	mux := http.NewServeMux()
+	orders.Register(mux, store)
 	// "/" is registered as a prefix pattern (trailing slash → catch-all).
 	// We self-check req.Path so unknown paths still 404 instead of getting
 	// the index page.
